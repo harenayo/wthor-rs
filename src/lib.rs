@@ -78,6 +78,11 @@ impl Jou {
     pub fn size(&self) -> usize {
         16 + 20 * self.players.len()
     }
+
+    /// The recommended [`stem`](std::path::Path::file_stem).
+    pub const fn file_stem() -> &'static str {
+        "wthor"
+    }
 }
 
 /// A trn file, which contains names of tournaments.
@@ -134,6 +139,11 @@ impl Trn {
     pub fn size(&self) -> usize {
         16 + 26 * self.tournaments.len()
     }
+
+    /// The recommended [`stem`](std::path::Path::file_stem).
+    pub const fn file_stem() -> &'static str {
+        "wthor"
+    }
 }
 
 /// A wtb file, which contains `8x8` Othello games.
@@ -150,6 +160,7 @@ pub struct Wtb {
     /// The year when the games was played.
     pub year: u16,
     /// A number used to calculate [`Game::theoretical_score`].
+    /// The value `0` is equivalent to the value `22` in files after 01/01/2001.
     pub calculation_depth: u8,
     /// Othello games.
     pub games: Vec<Game<60>>,
@@ -211,6 +222,11 @@ impl Wtb {
     pub fn size(&self) -> usize {
         16 + 68 * self.games.len()
     }
+
+    /// The recommended [`stem`](std::path::Path::file_stem).
+    pub fn file_stem(year: u16) -> String {
+        format!("wth_{year}")
+    }
 }
 
 /// A wtd file, which contains `10x10` Othello games.
@@ -227,6 +243,7 @@ pub struct Wtd {
     /// The year when the games was played.
     pub year: u16,
     /// A number used to calculate [`Game::theoretical_score`].
+    /// The value `0` is equivalent to `22` in files after 01/01/2001.
     pub calculation_depth: u8,
     /// Othello games.
     pub games: Vec<Game<96>>,
@@ -288,6 +305,11 @@ impl Wtd {
     pub fn size(&self) -> usize {
         16 + 104 * self.games.len()
     }
+
+    /// The recommended [`stem`](std::path::Path::file_stem).
+    pub fn file_stem(year: u16) -> String {
+        format!("wth_{year}")
+    }
 }
 
 /// A Othello game.
@@ -301,7 +323,7 @@ pub struct Game<const N: usize> {
     pub white_player: u16,
     /// The final number of black disks.
     pub score: u8,
-    /// The number of black disks if the black player had made the best moves since [`Wtb::calculation_depth`] or [`Wtd::calculation_depth`] empty squeres.
+    /// The number of black disks if the black player had made the best moves since a move when the number of empty squares is equal to `calculation_depth`.
     pub theoretical_score: u8,
     /// The moves.
     pub moves: [u8; N],
