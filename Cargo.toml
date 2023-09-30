@@ -5,3 +5,15 @@ edition = "2021"
 
 [dependencies]
 heapless = "0.7.16"
+hyper = { version = "0.14.27", features = ["client", "tcp"], optional = true }
+hyper-rustls = { version = "0.24.1", features = ["http2", "rustls-native-certs"], default-features = false, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.32.0", features = ["macros"] }
+
+[features]
+download = ["dep:hyper", "dep:hyper-rustls"]
+
+[[test]]
+name = "test"
+required-features = ["download"]

@@ -2,6 +2,14 @@
 
 mod slice;
 
+#[cfg(feature = "download")]
+mod download;
+
+#[cfg(feature = "download")]
+pub use crate::download::{
+    DownloadError,
+    Downloader,
+};
 use {
     crate::slice::{
         as_array,
