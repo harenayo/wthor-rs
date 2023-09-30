@@ -1,7 +1,12 @@
 [package]
 name = "wthor"
-version = "0.0.0"
+version = "0.1.0"
+authors = ["Harenayo"]
 edition = "2021"
+description = "A crate for WTHOR Database"
+readme = "README.md"
+repository = "https://github.com/harenayo/wthor-rs"
+license = "MIT"
 
 [dependencies]
 heapless = "0.7.16"
