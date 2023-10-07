@@ -1,7 +1,5 @@
 //! A crate for [WTHOR Database](https://www.ffothello.org/informatique/la-base-wthor).
 
-mod slice;
-
 #[cfg(feature = "download")]
 mod download;
 
@@ -11,24 +9,20 @@ pub use crate::download::{
     Downloader,
 };
 use {
-    crate::slice::{
-        as_array,
-        as_array_mut,
-        as_chunks,
-        as_chunks_mut,
-        split,
-        split_mut,
-    },
     heapless::Vec as HeaplessVec,
     std::{
         error::Error,
-        ffi::CStr,
         fmt::{
             Display,
             Formatter,
             Result as FmtResult,
         },
-        iter::zip,
+        io::{
+            Error as IoError,
+            Read,
+            Write,
+        },
+        iter::repeat,
     },
 };
 
@@ -49,47 +43,34 @@ pub struct Jou {
 
 impl Jou {
     /// Reads a file.
-    pub fn read(bytes: &[u8]) -> Result<Self, ReadError> {
-        let (header, players) = split(bytes).ok_or(ReadError)?;
-
+    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
         let (created_centry, created_year, created_month, created_day, number_of_players) =
-            read_names_header(header)?;
+            read_names_header(&mut r)?;
 
         Result::Ok(Self {
             created_centry,
             created_year,
             created_month,
             created_day,
-            players: read_names::<19, 20>(players, number_of_players)?,
+            players: read_names(&mut r, number_of_players)?,
         })
     }
 
     /// Writes a file.
-    pub fn write(&self, bytes: &mut [u8]) -> Result<(), WriteError> {
-        let (header, players) = split_mut(bytes).ok_or(WriteError::InvalidInput)?;
+    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
         let number_of_players = self.players.len() as u16;
 
         write_names_header(
-            header,
+            &mut w,
             self.created_centry,
             self.created_year,
             self.created_month,
             self.created_day,
             number_of_players,
-        );
+        )?;
 
-        write_names::<19, 20>(players, &self.players, number_of_players)?;
+        write_names(&mut w, &self.players, number_of_players)?;
         Result::Ok(())
-    }
-
-    /// Gets the number of bytes required to write the file.
-    pub fn size(&self) -> usize {
-        16 + 20 * self.players.len()
-    }
-
-    /// The recommended [`stem`](std::path::Path::file_stem).
-    pub const fn file_stem() -> &'static str {
-        "wthor"
     }
 }
 
@@ -110,47 +91,34 @@ pub struct Trn {
 
 impl Trn {
     /// Reads a file.
-    pub fn read(bytes: &[u8]) -> Result<Self, ReadError> {
-        let (header, players) = split(bytes).ok_or(ReadError)?;
-
+    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
         let (created_centry, created_year, created_month, created_day, number_of_players) =
-            read_names_header(header)?;
+            read_names_header(&mut r)?;
 
         Result::Ok(Self {
             created_centry,
             created_year,
             created_month,
             created_day,
-            tournaments: read_names::<25, 26>(players, number_of_players)?,
+            tournaments: read_names(&mut r, number_of_players)?,
         })
     }
 
     /// Writes a file.
-    pub fn write(&self, bytes: &mut [u8]) -> Result<(), WriteError> {
-        let (header, players) = split_mut(bytes).ok_or(WriteError::InvalidInput)?;
+    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
         let number_of_tournaments = self.tournaments.len() as u16;
 
         write_names_header(
-            header,
+            &mut w,
             self.created_centry,
             self.created_year,
             self.created_month,
             self.created_day,
             number_of_tournaments,
-        );
+        )?;
 
-        write_names::<25, 26>(players, &self.tournaments, number_of_tournaments)?;
+        write_names(&mut w, &self.tournaments, number_of_tournaments)?;
         Result::Ok(())
-    }
-
-    /// Gets the number of bytes required to write the file.
-    pub fn size(&self) -> usize {
-        16 + 26 * self.tournaments.len()
-    }
-
-    /// The recommended [`stem`](std::path::Path::file_stem).
-    pub const fn file_stem() -> &'static str {
-        "wthor"
     }
 }
 
@@ -176,9 +144,7 @@ pub struct Wtb {
 
 impl Wtb {
     /// Reads a file.
-    pub fn read(bytes: &[u8]) -> Result<Self, ReadError> {
-        let (header, games) = split(bytes).ok_or(ReadError)?;
-
+    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
         let (
             created_centry,
             created_year,
@@ -188,10 +154,10 @@ impl Wtb {
             year,
             size_of_board,
             calculation_depth,
-        ) = read_games_header(header)?;
+        ) = read_games_header(&mut r)?;
 
         if size_of_board != 0 && size_of_board != 8 {
-            return Result::Err(ReadError);
+            return Result::Err(ReadError::InvalidFormat);
         }
 
         Result::Ok(Self {
@@ -201,17 +167,16 @@ impl Wtb {
             created_day,
             year,
             calculation_depth,
-            games: read_games::<60, 68>(games, number_of_games)?,
+            games: read_games(&mut r, number_of_games)?,
         })
     }
 
     /// Writes a file.
-    pub fn write(&self, bytes: &mut [u8]) -> Result<(), WriteError> {
-        let (header, games) = split_mut(bytes).ok_or(WriteError::InvalidInput)?;
+    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
         let number_of_games = self.games.len() as u32;
 
         write_games_header(
-            header,
+            &mut w,
             self.created_centry,
             self.created_year,
             self.created_month,
@@ -220,20 +185,10 @@ impl Wtb {
             self.year,
             8,
             self.calculation_depth,
-        );
+        )?;
 
-        write_games::<60, 68>(games, &self.games, number_of_games)?;
+        write_games(&mut w, &self.games, number_of_games)?;
         Result::Ok(())
-    }
-
-    /// Gets the number of bytes required to write the file.
-    pub fn size(&self) -> usize {
-        16 + 68 * self.games.len()
-    }
-
-    /// The recommended [`stem`](std::path::Path::file_stem).
-    pub fn file_stem(year: u16) -> String {
-        format!("wth_{year}")
     }
 }
 
@@ -259,9 +214,7 @@ pub struct Wtd {
 
 impl Wtd {
     /// Reads a file.
-    pub fn read(bytes: &[u8]) -> Result<Self, ReadError> {
-        let (header, games) = split(bytes).ok_or(ReadError)?;
-
+    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
         let (
             created_centry,
             created_year,
@@ -271,10 +224,10 @@ impl Wtd {
             year,
             size_of_board,
             calculation_depth,
-        ) = read_games_header(header)?;
+        ) = read_games_header(&mut r)?;
 
         if size_of_board != 10 {
-            return Result::Err(ReadError);
+            return Result::Err(ReadError::InvalidFormat);
         }
 
         Result::Ok(Self {
@@ -284,39 +237,28 @@ impl Wtd {
             created_day,
             year,
             calculation_depth,
-            games: read_games::<96, 104>(games, number_of_games)?,
+            games: read_games(&mut r, number_of_games)?,
         })
     }
 
     /// Writes a file.
-    pub fn write(&self, bytes: &mut [u8]) -> Result<(), WriteError> {
-        let (header, games) = split_mut(bytes).ok_or(WriteError::InvalidInput)?;
+    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
         let number_of_games = self.games.len() as u32;
 
         write_games_header(
-            header,
+            &mut w,
             self.created_centry,
             self.created_year,
             self.created_month,
             self.created_day,
             number_of_games,
             self.year,
-            10,
+            8,
             self.calculation_depth,
-        );
+        )?;
 
-        write_games::<96, 104>(games, &self.games, number_of_games)?;
+        write_games(&mut w, &self.games, number_of_games)?;
         Result::Ok(())
-    }
-
-    /// Gets the number of bytes required to write the file.
-    pub fn size(&self) -> usize {
-        16 + 104 * self.games.len()
-    }
-
-    /// The recommended [`stem`](std::path::Path::file_stem).
-    pub fn file_stem(year: u16) -> String {
-        format!("wth_{year}")
     }
 }
 
@@ -334,27 +276,39 @@ pub struct Game<const N: usize> {
     /// The number of black disks if the black player had made the best moves since a move when the number of empty squares is equal to `calculation_depth`.
     pub theoretical_score: u8,
     /// The moves.
-    pub moves: [u8; N],
+    pub moves: HeaplessVec<u8, N>,
 }
 
-fn read_header(bytes: &[u8; 16]) -> (u8, u8, u8, u8, u32, u16, u16, u8, u8, u8) {
-    (
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        u32::from_le_bytes(*as_array(&bytes[4..=7]).unwrap()),
-        u16::from_le_bytes(*as_array(&bytes[8..=9]).unwrap()),
-        u16::from_le_bytes(*as_array(&bytes[10..=11]).unwrap()),
-        bytes[12],
-        bytes[13],
-        bytes[14],
-    )
+fn read<R: Read, const N: usize>(r: &mut R) -> Result<[u8; N], ReadError> {
+    let mut result = [0; N];
+    r.read_exact(&mut result)?;
+    Result::Ok(result)
+}
+
+#[allow(clippy::type_complexity)]
+fn read_header<R: Read>(
+    r: &mut R,
+) -> Result<(u8, u8, u8, u8, u32, u16, u16, u8, u8, u8), ReadError> {
+    let result = (
+        read::<_, 1>(r)?[0],
+        read::<_, 1>(r)?[0],
+        read::<_, 1>(r)?[0],
+        read::<_, 1>(r)?[0],
+        u32::from_le_bytes(read(r)?),
+        u16::from_le_bytes(read(r)?),
+        u16::from_le_bytes(read(r)?),
+        read::<_, 1>(r)?[0],
+        read::<_, 1>(r)?[0],
+        read::<_, 1>(r)?[0],
+    );
+
+    read::<_, 1>(r)?;
+    Result::Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_header(
-    bytes: &mut [u8; 16],
+fn write_header<W: Write>(
+    w: &mut W,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
@@ -365,20 +319,16 @@ fn write_header(
     p1: u8,
     p2: u8,
     p3: u8,
-) {
-    bytes[0] = created_centry;
-    bytes[1] = created_year;
-    bytes[2] = created_month;
-    bytes[3] = created_day;
-    *as_array_mut(&mut bytes[4..=7]).unwrap() = n1.to_le_bytes();
-    *as_array_mut(&mut bytes[8..=9]).unwrap() = n2.to_le_bytes();
-    *as_array_mut(&mut bytes[10..=11]).unwrap() = game_year.to_le_bytes();
-    bytes[12] = p1;
-    bytes[13] = p2;
-    bytes[14] = p3;
+) -> Result<(), WriteError> {
+    w.write_all(&[created_centry, created_year, created_month, created_day])?;
+    w.write_all(&n1.to_le_bytes())?;
+    w.write_all(&n2.to_le_bytes())?;
+    w.write_all(&game_year.to_le_bytes())?;
+    w.write_all(&[p1, p2, p3, 0])?;
+    Result::Ok(())
 }
 
-fn read_names_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u16), ReadError> {
+fn read_names_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u16), ReadError> {
     let (
         created_centry,
         created_year,
@@ -390,10 +340,10 @@ fn read_names_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u16), ReadErro
         p1,
         p2,
         _,
-    ) = read_header(bytes);
+    ) = read_header(r)?;
 
     if n1 != 0 || game_year != 0 || p1 != 0 || p2 != 0 {
-        return Result::Err(ReadError);
+        return Result::Err(ReadError::InvalidFormat);
     }
 
     Result::Ok((
@@ -405,16 +355,16 @@ fn read_names_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u16), ReadErro
     ))
 }
 
-fn write_names_header(
-    bytes: &mut [u8; 16],
+fn write_names_header<W: Write>(
+    w: &mut W,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
     created_day: u8,
     number_of_names: u16,
-) {
+) -> Result<(), WriteError> {
     write_header(
-        bytes,
+        w,
         created_centry,
         created_year,
         created_month,
@@ -425,11 +375,11 @@ fn write_names_header(
         0,
         0,
         0,
-    );
+    )
 }
 
 #[allow(clippy::type_complexity)]
-fn read_games_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u32, u16, u8, u8), ReadError> {
+fn read_games_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u32, u16, u8, u8), ReadError> {
     let (
         created_centry,
         created_year,
@@ -441,10 +391,10 @@ fn read_games_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u32, u16, u8, 
         size_of_board,
         game_type,
         calculation_depth,
-    ) = read_header(bytes);
+    ) = read_header(r)?;
 
     if n2 != 0 || game_type != 0 {
-        return Result::Err(ReadError);
+        return Result::Err(ReadError::InvalidFormat);
     }
 
     Result::Ok((
@@ -460,8 +410,8 @@ fn read_games_header(bytes: &[u8; 16]) -> Result<(u8, u8, u8, u8, u32, u16, u8, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_games_header(
-    bytes: &mut [u8; 16],
+fn write_games_header<W: Write>(
+    w: &mut W,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
@@ -470,9 +420,9 @@ fn write_games_header(
     year: u16,
     size_of_board: u8,
     calculation_depth: u8,
-) {
+) -> Result<(), WriteError> {
     write_header(
-        bytes,
+        w,
         created_centry,
         created_year,
         created_month,
@@ -483,33 +433,34 @@ fn write_games_header(
         size_of_board,
         0,
         calculation_depth,
-    );
+    )
 }
 
-fn read_names<const N: usize, const SN: usize>(
-    bytes: &[u8],
+fn read_names<R: Read, const N: usize>(
+    r: &mut R,
     count: u16,
 ) -> Result<Vec<HeaplessVec<u8, N>>, ReadError> {
-    let count = count as usize;
-    let chunks = as_chunks::<_, SN>(bytes, count).ok_or(ReadError)?;
-    let mut result = Vec::with_capacity(count);
+    let result = (0..count)
+        .map(|_| {
+            let result = read::<_, N>(r)?
+                .into_iter()
+                .take_while(|c| *c != b'0')
+                .collect();
 
-    for chunk in chunks {
-        result.push(
-            HeaplessVec::from_slice(
-                CStr::from_bytes_until_nul(chunk)
-                    .map_err(|_| ReadError)?
-                    .to_bytes(),
-            )
-            .map_err(|_| ReadError)?,
-        );
+            read::<_, 1>(r)?;
+            Result::Ok(result)
+        })
+        .collect();
+
+    if read::<_, 1>(r).is_ok() {
+        return Result::Err(ReadError::InvalidFormat);
     }
 
-    Result::Ok(result)
+    result
 }
 
-fn write_names<const N: usize, const SN: usize>(
-    bytes: &mut [u8],
+fn write_names<W: Write, const N: usize>(
+    w: &mut W,
     names: &[HeaplessVec<u8, N>],
     count: u16,
 ) -> Result<(), WriteError> {
@@ -517,44 +468,42 @@ fn write_names<const N: usize, const SN: usize>(
         return Result::Err(WriteError::TooManyElements);
     }
 
-    let chunks = as_chunks_mut::<_, SN>(bytes, names.len()).ok_or(WriteError::InvalidInput)?;
-
-    if chunks.len() != names.len() {
-        return Result::Err(WriteError::InvalidInput);
-    }
-
-    for (chunk, name) in zip(chunks, names) {
-        chunk[0..name.len()].copy_from_slice(name);
-        chunk[name.len()] = b'0';
+    for name in names {
+        let mut name = name.clone();
+        name.extend(repeat(b'0').take(N - name.len()));
+        w.write_all(&name)?;
+        w.write_all(&[b'0'])?;
     }
 
     Result::Ok(())
 }
 
-fn read_games<const N: usize, const S: usize>(
-    bytes: &[u8],
-    count: u32,
-) -> Result<Vec<Game<N>>, ReadError> {
-    let count = count as usize;
-    let chunks = as_chunks::<_, S>(bytes, count).ok_or(ReadError)?;
-    let mut result = Vec::with_capacity(count);
+fn read_games<R: Read, const N: usize>(r: &mut R, count: u32) -> Result<Vec<Game<N>>, ReadError> {
+    let result = (0..count)
+        .map(|_| {
+            Result::Ok(Game {
+                tournament: u16::from_le_bytes(read(r)?),
+                black_player: u16::from_le_bytes(read(r)?),
+                white_player: u16::from_le_bytes(read(r)?),
+                score: read::<_, 1>(r)?[0],
+                theoretical_score: read::<_, 1>(r)?[0],
+                moves: read::<_, N>(r)?
+                    .into_iter()
+                    .take_while(|r#move| *r#move != 0)
+                    .collect(),
+            })
+        })
+        .collect();
 
-    for chunk in chunks {
-        result.push(Game {
-            tournament: u16::from_le_bytes(*as_array(&chunk[0..=1]).unwrap()),
-            black_player: u16::from_le_bytes(*as_array(&chunk[2..=3]).unwrap()),
-            white_player: u16::from_le_bytes(*as_array(&chunk[4..=5]).unwrap()),
-            score: chunk[6],
-            theoretical_score: chunk[7],
-            moves: *as_array(&chunk[8..]).ok_or(ReadError)?,
-        });
+    if read::<_, 1>(r).is_ok() {
+        return Result::Err(ReadError::InvalidFormat);
     }
 
-    Result::Ok(result)
+    result
 }
 
-fn write_games<const N: usize, const S: usize>(
-    bytes: &mut [u8],
+fn write_games<W: Write, const N: usize>(
+    w: &mut W,
     games: &[Game<N>],
     count: u32,
 ) -> Result<(), WriteError> {
@@ -562,53 +511,67 @@ fn write_games<const N: usize, const S: usize>(
         return Result::Err(WriteError::TooManyElements);
     }
 
-    let chunks = as_chunks_mut::<_, S>(bytes, games.len()).ok_or(WriteError::InvalidInput)?;
-
-    if chunks.len() != games.len() {
-        return Result::Err(WriteError::InvalidInput);
-    }
-
-    for (chunk, game) in zip(chunks, games) {
-        *as_array_mut(&mut chunk[0..=1]).unwrap() = game.tournament.to_le_bytes();
-        *as_array_mut(&mut chunk[2..=3]).unwrap() = game.black_player.to_le_bytes();
-        *as_array_mut(&mut chunk[4..=5]).unwrap() = game.white_player.to_le_bytes();
-        chunk[6] = game.score;
-        chunk[7] = game.theoretical_score;
-        *as_array_mut(&mut chunk[8..]).ok_or(WriteError::InvalidInput)? = game.moves;
+    for game in games {
+        w.write_all(&game.tournament.to_le_bytes())?;
+        w.write_all(&game.black_player.to_le_bytes())?;
+        w.write_all(&game.white_player.to_le_bytes())?;
+        w.write_all(&[game.score, game.theoretical_score])?;
+        let mut moves = game.moves.clone();
+        moves.extend(repeat(0).take(N - moves.len()));
+        w.write_all(&moves)?;
     }
 
     Result::Ok(())
 }
 
 /// An error while reading.
-/// This indicates that the input is an invalid file.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ReadError;
+#[derive(Debug)]
+pub enum ReadError {
+    /// The input is an invalid file.
+    InvalidFormat,
+    /// See [`Error`](IoError).
+    Io(IoError),
+}
 
 impl Display for ReadError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.write_str("the input is invalid")
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::InvalidFormat => formatter.write_str("the input is invalid"),
+            Self::Io(error) => error.fmt(formatter),
+        }
     }
 }
 
 impl Error for ReadError {}
 
+impl From<IoError> for ReadError {
+    fn from(error: IoError) -> Self {
+        Self::Io(error)
+    }
+}
+
 /// An error while writing.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Debug)]
 pub enum WriteError {
-    /// The length of the input slice is not equals to the file size.
-    InvalidInput,
-    /// The input has too many elements.
+    /// The file has too many elements.
     TooManyElements,
+    /// See [`Error`](IoError).
+    Io(IoError),
 }
 
 impl Display for WriteError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.write_str(match self {
-            Self::InvalidInput => "the input is invalid",
-            Self::TooManyElements => "the elements is too many",
-        })
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::TooManyElements => formatter.write_str("the elements is too many"),
+            Self::Io(error) => error.fmt(formatter),
+        }
     }
 }
 
 impl Error for WriteError {}
+
+impl From<IoError> for WriteError {
+    fn from(error: IoError) -> Self {
+        Self::Io(error)
+    }
+}

@@ -1,20 +1,23 @@
 use {
     crate::{
         Jou,
+        ReadError,
         Trn,
         Wtb,
     },
     hyper::{
         body::{
-            to_bytes,
-            Bytes,
+            aggregate,
+            Buf as _,
         },
         client::{
             Client,
             HttpConnector,
         },
+        http::uri::InvalidUri as UriError,
         Error as HyperError,
         StatusCode,
+        Uri,
     },
     hyper_rustls::{
         HttpsConnector,
@@ -23,13 +26,19 @@ use {
     std::{
         error::Error,
         fmt::{
-            Debug,
             Display,
             Formatter,
             Result as FmtResult,
         },
+        io::Read,
     },
 };
+
+macro_rules! uri {
+    ($name:literal) => {
+        concat!("https://www.ffothello.org/wthor/base/", $name)
+    };
+}
 
 /// A database file downloader.
 #[derive(Clone, Debug)]
@@ -55,39 +64,32 @@ impl Downloader {
     }
 
     /// Downloads a jou file.
-    pub async fn jou(&self) -> Result<Bytes, DownloadError> {
-        let mut name = Jou::file_stem().to_uppercase();
-        name.push_str(".JOU");
-        self.download(&name).await
+    pub async fn jou(&self) -> Result<Jou, DownloadError> {
+        Result::Ok(Jou::read(
+            self.download(Uri::from_static(uri!("WTHOR.JOU"))).await?,
+        )?)
     }
 
     /// Downloads a trn file.
-    pub async fn trn(&self) -> Result<Bytes, DownloadError> {
-        let mut name = Trn::file_stem().to_uppercase();
-        name.push_str(".TRN");
-        self.download(&name).await
+    pub async fn trn(&self) -> Result<Trn, DownloadError> {
+        Result::Ok(Trn::read(
+            self.download(Uri::from_static(uri!("WTHOR.TRN"))).await?,
+        )?)
     }
 
     /// Downloads a wtb file.
-    pub async fn wtb(&self, year: u16) -> Result<Bytes, DownloadError> {
-        let mut name = Wtb::file_stem(year);
-        name.make_ascii_uppercase();
-        name.push_str(".wtb");
-        self.download(&name).await
+    pub async fn wtb(&self, year: u16) -> Result<Wtb, DownloadError> {
+        Result::Ok(Wtb::read(
+            self.download(format!(uri!("WTH_{}.wtb"), year).parse()?)
+                .await?,
+        )?)
     }
 
-    async fn download(&self, name: &str) -> Result<Bytes, DownloadError> {
-        let response = self
-            .client
-            .get(
-                format!("https://www.ffothello.org/wthor/base/{name}")
-                    .parse()
-                    .unwrap(),
-            )
-            .await?;
+    async fn download(&self, uri: Uri) -> Result<impl Read, DownloadError> {
+        let response = self.client.get(uri).await?;
 
         match response.status() {
-            StatusCode::OK => Result::Ok(to_bytes(response.into_body()).await?),
+            StatusCode::OK => Result::Ok(aggregate(response).await?.reader()),
             _ => Result::Err(DownloadError::StatusCode(response.status())),
         }
     }
@@ -102,23 +104,43 @@ impl Default for Downloader {
 /// An error while downloading.
 #[derive(Debug)]
 pub enum DownloadError {
+    /// See [`InvalidUri`](UriError).
+    Uri(UriError),
+    /// See [`StatusCode`].
     StatusCode(StatusCode),
+    /// See [`Error`](HyperError).
     Hyper(HyperError),
+    /// See [`ReadError`].
+    Read(ReadError),
 }
 
 impl Display for DownloadError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::StatusCode(code) => Display::fmt(&code, f),
-            Self::Hyper(error) => Display::fmt(&error, f),
+            Self::Uri(error) => error.fmt(formatter),
+            Self::StatusCode(code) => code.fmt(formatter),
+            Self::Hyper(error) => error.fmt(formatter),
+            Self::Read(error) => error.fmt(formatter),
         }
     }
 }
 
 impl Error for DownloadError {}
 
+impl From<UriError> for DownloadError {
+    fn from(error: UriError) -> Self {
+        Self::Uri(error)
+    }
+}
+
 impl From<HyperError> for DownloadError {
     fn from(error: HyperError) -> Self {
         Self::Hyper(error)
+    }
+}
+
+impl From<ReadError> for DownloadError {
+    fn from(error: ReadError) -> Self {
+        Self::Read(error)
     }
 }
