@@ -63,28 +63,6 @@ impl Downloader {
         }
     }
 
-    /// Downloads a jou file.
-    pub async fn jou(&self) -> Result<Jou, DownloadError> {
-        Result::Ok(Jou::read(
-            self.download(Uri::from_static(uri!("WTHOR.JOU"))).await?,
-        )?)
-    }
-
-    /// Downloads a trn file.
-    pub async fn trn(&self) -> Result<Trn, DownloadError> {
-        Result::Ok(Trn::read(
-            self.download(Uri::from_static(uri!("WTHOR.TRN"))).await?,
-        )?)
-    }
-
-    /// Downloads a wtb file.
-    pub async fn wtb(&self, year: u16) -> Result<Wtb, DownloadError> {
-        Result::Ok(Wtb::read(
-            self.download(format!(uri!("WTH_{}.wtb"), year).parse()?)
-                .await?,
-        )?)
-    }
-
     async fn download(&self, uri: Uri) -> Result<impl Read, DownloadError> {
         let response = self.client.get(uri).await?;
 
@@ -92,6 +70,39 @@ impl Downloader {
             StatusCode::OK => Result::Ok(aggregate(response).await?.reader()),
             _ => Result::Err(DownloadError::StatusCode(response.status())),
         }
+    }
+}
+
+impl Jou {
+    /// Downloads a file.
+    pub async fn download(downloader: &Downloader) -> Result<Self, DownloadError> {
+        Result::Ok(Self::read(
+            downloader
+                .download(Uri::from_static(uri!("WTHOR.JOU")))
+                .await?,
+        )?)
+    }
+}
+
+impl Trn {
+    /// Downloads a file.
+    pub async fn download(downloader: &Downloader) -> Result<Self, DownloadError> {
+        Result::Ok(Self::read(
+            downloader
+                .download(Uri::from_static(uri!("WTHOR.TRN")))
+                .await?,
+        )?)
+    }
+}
+
+impl Wtb {
+    /// Downloads a file.
+    pub async fn download(downloader: &Downloader, year: u16) -> Result<Self, DownloadError> {
+        Result::Ok(Self::read(
+            downloader
+                .download(format!(uri!("WTH_{}.wtb"), year).parse()?)
+                .await?,
+        )?)
     }
 }
 

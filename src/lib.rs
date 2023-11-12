@@ -4,12 +4,10 @@
 mod download;
 
 #[cfg(feature = "download")]
-pub use crate::download::{
-    DownloadError,
-    Downloader,
-};
+pub use crate::download::*;
 use {
     heapless::Vec as HeaplessVec,
+    othello::Position,
     std::{
         error::Error,
         fmt::{
@@ -43,7 +41,7 @@ pub struct Jou {
 
 impl Jou {
     /// Reads a file.
-    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
+    pub fn read(mut r: impl Read) -> Result<Self, ReadError> {
         let (created_centry, created_year, created_month, created_day, number_of_players) =
             read_names_header(&mut r)?;
 
@@ -57,7 +55,7 @@ impl Jou {
     }
 
     /// Writes a file.
-    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
+    pub fn write(&self, mut w: impl Write) -> Result<(), WriteError> {
         let number_of_players = self.players.len() as u16;
 
         write_names_header(
@@ -91,7 +89,7 @@ pub struct Trn {
 
 impl Trn {
     /// Reads a file.
-    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
+    pub fn read(mut r: impl Read) -> Result<Self, ReadError> {
         let (created_centry, created_year, created_month, created_day, number_of_players) =
             read_names_header(&mut r)?;
 
@@ -105,7 +103,7 @@ impl Trn {
     }
 
     /// Writes a file.
-    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
+    pub fn write(&self, mut w: impl Write) -> Result<(), WriteError> {
         let number_of_tournaments = self.tournaments.len() as u16;
 
         write_names_header(
@@ -139,12 +137,12 @@ pub struct Wtb {
     /// The value `0` is equivalent to the value `22` in files after 01/01/2001.
     pub calculation_depth: u8,
     /// Othello games.
-    pub games: Vec<Game<60>>,
+    pub games: Vec<GameInfo>,
 }
 
 impl Wtb {
     /// Reads a file.
-    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
+    pub fn read(mut r: impl Read) -> Result<Self, ReadError> {
         let (
             created_centry,
             created_year,
@@ -172,77 +170,7 @@ impl Wtb {
     }
 
     /// Writes a file.
-    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
-        let number_of_games = self.games.len() as u32;
-
-        write_games_header(
-            &mut w,
-            self.created_centry,
-            self.created_year,
-            self.created_month,
-            self.created_day,
-            number_of_games,
-            self.year,
-            8,
-            self.calculation_depth,
-        )?;
-
-        write_games(&mut w, &self.games, number_of_games)?;
-        Result::Ok(())
-    }
-}
-
-/// A wtd file, which contains `10x10` Othello games.
-#[derive(Clone, Hash, Debug)]
-pub struct Wtd {
-    /// The centry when the file was created.
-    pub created_centry: u8,
-    /// The year when the file was created.
-    pub created_year: u8,
-    /// The month when the file was created.
-    pub created_month: u8,
-    /// The day when the file was created.
-    pub created_day: u8,
-    /// The year when the games was played.
-    pub year: u16,
-    /// A number used to calculate [`Game::theoretical_score`].
-    /// The value `0` is equivalent to `22` in files after 01/01/2001.
-    pub calculation_depth: u8,
-    /// Othello games.
-    pub games: Vec<Game<96>>,
-}
-
-impl Wtd {
-    /// Reads a file.
-    pub fn read<R: Read>(mut r: R) -> Result<Self, ReadError> {
-        let (
-            created_centry,
-            created_year,
-            created_month,
-            created_day,
-            number_of_games,
-            year,
-            size_of_board,
-            calculation_depth,
-        ) = read_games_header(&mut r)?;
-
-        if size_of_board != 10 {
-            return Result::Err(ReadError::InvalidFormat);
-        }
-
-        Result::Ok(Self {
-            created_centry,
-            created_year,
-            created_month,
-            created_day,
-            year,
-            calculation_depth,
-            games: read_games(&mut r, number_of_games)?,
-        })
-    }
-
-    /// Writes a file.
-    pub fn write<W: Write>(&self, mut w: W) -> Result<(), WriteError> {
+    pub fn write(&self, mut w: impl Write) -> Result<(), WriteError> {
         let number_of_games = self.games.len() as u32;
 
         write_games_header(
@@ -264,7 +192,7 @@ impl Wtd {
 
 /// A Othello game.
 #[derive(Clone, Hash, Debug)]
-pub struct Game<const N: usize> {
+pub struct GameInfo {
     /// The index of the tournament.
     pub tournament: u16,
     /// The index of the black player.
@@ -276,39 +204,39 @@ pub struct Game<const N: usize> {
     /// The number of black disks if the black player had made the best moves since a move when the number of empty squares is equal to `calculation_depth`.
     pub theoretical_score: u8,
     /// The moves.
-    pub moves: HeaplessVec<u8, N>,
+    pub moves: HeaplessVec<Position, 60>,
 }
 
-fn read<R: Read, const N: usize>(r: &mut R) -> Result<[u8; N], ReadError> {
+fn read<const N: usize>(r: &mut impl Read) -> Result<[u8; N], ReadError> {
     let mut result = [0; N];
     r.read_exact(&mut result)?;
     Result::Ok(result)
 }
 
 #[allow(clippy::type_complexity)]
-fn read_header<R: Read>(
-    r: &mut R,
+fn read_header(
+    r: &mut impl Read,
 ) -> Result<(u8, u8, u8, u8, u32, u16, u16, u8, u8, u8), ReadError> {
     let result = (
-        read::<_, 1>(r)?[0],
-        read::<_, 1>(r)?[0],
-        read::<_, 1>(r)?[0],
-        read::<_, 1>(r)?[0],
+        read::<1>(r)?[0],
+        read::<1>(r)?[0],
+        read::<1>(r)?[0],
+        read::<1>(r)?[0],
         u32::from_le_bytes(read(r)?),
         u16::from_le_bytes(read(r)?),
         u16::from_le_bytes(read(r)?),
-        read::<_, 1>(r)?[0],
-        read::<_, 1>(r)?[0],
-        read::<_, 1>(r)?[0],
+        read::<1>(r)?[0],
+        read::<1>(r)?[0],
+        read::<1>(r)?[0],
     );
 
-    read::<_, 1>(r)?;
+    read::<1>(r)?;
     Result::Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_header<W: Write>(
-    w: &mut W,
+fn write_header(
+    w: &mut impl Write,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
@@ -328,7 +256,7 @@ fn write_header<W: Write>(
     Result::Ok(())
 }
 
-fn read_names_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u16), ReadError> {
+fn read_names_header(r: &mut impl Read) -> Result<(u8, u8, u8, u8, u16), ReadError> {
     let (
         created_centry,
         created_year,
@@ -355,8 +283,8 @@ fn read_names_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u16), ReadEr
     ))
 }
 
-fn write_names_header<W: Write>(
-    w: &mut W,
+fn write_names_header(
+    w: &mut impl Write,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
@@ -379,7 +307,7 @@ fn write_names_header<W: Write>(
 }
 
 #[allow(clippy::type_complexity)]
-fn read_games_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u32, u16, u8, u8), ReadError> {
+fn read_games_header(r: &mut impl Read) -> Result<(u8, u8, u8, u8, u32, u16, u8, u8), ReadError> {
     let (
         created_centry,
         created_year,
@@ -410,8 +338,8 @@ fn read_games_header<R: Read>(r: &mut R) -> Result<(u8, u8, u8, u8, u32, u16, u8
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_games_header<W: Write>(
-    w: &mut W,
+fn write_games_header(
+    w: &mut impl Write,
     created_centry: u8,
     created_year: u8,
     created_month: u8,
@@ -436,31 +364,31 @@ fn write_games_header<W: Write>(
     )
 }
 
-fn read_names<R: Read, const N: usize>(
-    r: &mut R,
+fn read_names<const N: usize>(
+    r: &mut impl Read,
     count: u16,
 ) -> Result<Vec<HeaplessVec<u8, N>>, ReadError> {
     let result = (0..count)
         .map(|_| {
-            let result = read::<_, N>(r)?
+            let result = read::<N>(r)?
                 .into_iter()
                 .take_while(|c| *c != b'0')
                 .collect();
 
-            read::<_, 1>(r)?;
+            read::<1>(r)?;
             Result::Ok(result)
         })
         .collect();
 
-    if read::<_, 1>(r).is_ok() {
+    if read::<1>(r).is_ok() {
         return Result::Err(ReadError::InvalidFormat);
     }
 
     result
 }
 
-fn write_names<W: Write, const N: usize>(
-    w: &mut W,
+fn write_names<const N: usize>(
+    w: &mut impl Write,
     names: &[HeaplessVec<u8, N>],
     count: u16,
 ) -> Result<(), WriteError> {
@@ -478,35 +406,43 @@ fn write_names<W: Write, const N: usize>(
     Result::Ok(())
 }
 
-fn read_games<R: Read, const N: usize>(r: &mut R, count: u32) -> Result<Vec<Game<N>>, ReadError> {
+fn read_games(r: &mut impl Read, count: u32) -> Result<Vec<GameInfo>, ReadError> {
     let result = (0..count)
         .map(|_| {
-            Result::Ok(Game {
+            Result::Ok(GameInfo {
                 tournament: u16::from_le_bytes(read(r)?),
                 black_player: u16::from_le_bytes(read(r)?),
                 white_player: u16::from_le_bytes(read(r)?),
-                score: read::<_, 1>(r)?[0],
-                theoretical_score: read::<_, 1>(r)?[0],
-                moves: read::<_, N>(r)?
-                    .into_iter()
-                    .take_while(|r#move| *r#move != 0)
-                    .collect(),
+                score: read::<1>(r)?[0],
+                theoretical_score: read::<1>(r)?[0],
+                moves: {
+                    let moves: HeaplessVec<_, 60> = read::<60>(r)?
+                        .into_iter()
+                        .take_while(|r#move| *r#move != 0)
+                        .map(|r#move| Position::at(r#move / 10 - 1, r#move % 10 - 1))
+                        .collect::<Option<_>>()
+                        .ok_or(ReadError::InvalidFormat)?;
+
+                    if let Option::Some(r#move) = moves.iter().next() {
+                        if *r#move != Position::at(4, 5).unwrap() {
+                            return Result::Err(ReadError::InvalidFormat);
+                        }
+                    }
+
+                    moves
+                },
             })
         })
         .collect();
 
-    if read::<_, 1>(r).is_ok() {
+    if read::<1>(r).is_ok() {
         return Result::Err(ReadError::InvalidFormat);
     }
 
     result
 }
 
-fn write_games<W: Write, const N: usize>(
-    w: &mut W,
-    games: &[Game<N>],
-    count: u32,
-) -> Result<(), WriteError> {
+fn write_games(w: &mut impl Write, games: &[GameInfo], count: u32) -> Result<(), WriteError> {
     if games.len() != count as usize {
         return Result::Err(WriteError::TooManyElements);
     }
@@ -516,9 +452,16 @@ fn write_games<W: Write, const N: usize>(
         w.write_all(&game.black_player.to_le_bytes())?;
         w.write_all(&game.white_player.to_le_bytes())?;
         w.write_all(&[game.score, game.theoretical_score])?;
-        let mut moves = game.moves.clone();
-        moves.extend(repeat(0).take(N - moves.len()));
-        w.write_all(&moves)?;
+
+        w.write_all(
+            &game
+                .moves
+                .iter()
+                .map(|r#move| 10 * r#move.row() + r#move.column() + 11)
+                .chain(repeat(0))
+                .take(60)
+                .collect::<HeaplessVec<_, 60>>(),
+        )?;
     }
 
     Result::Ok(())
